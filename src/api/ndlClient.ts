@@ -14,19 +14,30 @@ function getTextByLocalName(el: Element, localName: string): string {
   return '';
 }
 
-function parseXmlBooks(xmlText: string, label: string): { books: Book[]; total: number } {
+function parseXmlBooks(xmlText: string, label: string, fallbackYear = 0): { books: Book[]; total: number; diagnostic: string } {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xmlText, 'application/xml');
 
   const parseError = doc.querySelector('parsererror');
   if (parseError) {
     console.error('XML parse error', parseError.textContent);
-    return { books: [], total: 0 };
+    return { books: [], total: 0, diagnostic: 'XMLパースエラー' };
+  }
+
+  const allEls = doc.getElementsByTagName('*');
+
+  // Extract SRU diagnostic message if present (query errors etc.)
+  let diagnostic = '';
+  for (let i = 0; i < allEls.length; i++) {
+    const ln = allEls[i].localName;
+    if (ln === 'message' || ln === 'details') {
+      const txt = allEls[i].textContent?.trim();
+      if (txt) diagnostic += (diagnostic ? ' / ' : '') + `${ln}: ${txt}`;
+    }
   }
 
   // numberOfRecords may have namespace prefix
   let total = 0;
-  const allEls = doc.getElementsByTagName('*');
   for (let i = 0; i < allEls.length; i++) {
     if (allEls[i].localName === 'numberOfRecords') {
       total = parseInt(allEls[i].textContent || '0', 10);
@@ -68,18 +79,18 @@ function parseXmlBooks(xmlText: string, label: string): { books: Book[]; total: 
     const title = getTextByLocalName(record, 'title');
     const author = getTextByLocalName(record, 'creator');
     const publisher = getTextByLocalName(record, 'publisher');
-    // NDL uses dcterms:issued for publication date
+    // dcndl record uses dcterms:issued (or dc:date) for publication date
     const dateStr = getTextByLocalName(record, 'issued') || getTextByLocalName(record, 'date');
 
     const yearMatch = dateStr.match(/(\d{4})/);
-    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : fallbackYear;
 
-    if (title && year > 0) {
+    if (title) {
       books.push({ title, author, year, publisher, ndc, label });
     }
   });
 
-  return { books, total };
+  return { books, total, diagnostic };
 }
 
 export async function fetchBooksForLabelYear(
@@ -96,8 +107,8 @@ export async function fetchBooksForLabelYear(
     return cached;
   }
 
-  // NDL SRU CQL: 'anywhere' searches all fields including series title; 'issued' is the correct date index
-  const baseQuery = `(anywhere="${label}") AND (issued="${year}") AND (mediatype=1)`;
+  // NDL SRU CQL: 'anywhere' = full-text keyword; 'from'/'until' = publication date range (year ok)
+  const baseQuery = `anywhere="${label}" AND from="${year}" AND until="${year}"`;
   const pageSize = 200;
   let startRecord = 1;
   let totalRecords = 0;
@@ -119,15 +130,14 @@ export async function fetchBooksForLabelYear(
       throw new Error(`Proxy request failed: ${resp.status} ${resp.statusText}`);
     }
     const xmlText = await resp.text();
-    const { books, total } = parseXmlBooks(xmlText, label);
+    const { books, total, diagnostic } = parseXmlBooks(xmlText, label, year);
 
     if (startRecord === 1) {
       totalRecords = total;
-      const head = xmlText.slice(0, 200).replace(/\s+/g, ' ');
-      console.log(`[NDL] ${label} ${year}: ${total}件 レスポンス先頭:`, xmlText.slice(0, 400));
+      console.log(`[NDL] ${label} ${year}: ${total}件`, xmlText.slice(0, 400));
       onLog?.(`${label} ${year}: numberOfRecords=${total} / 抽出=${books.length}件`);
-      if (total === 0) {
-        onLog?.(`  ↳ レスポンス先頭: ${head}`);
+      if (diagnostic) {
+        onLog?.(`  ↳ NDL診断: ${diagnostic}`);
       }
     }
 
