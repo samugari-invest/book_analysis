@@ -86,11 +86,13 @@ export async function fetchBooksForLabelYear(
   proxyUrl: string,
   label: string,
   year: number,
-  onProgress?: (fetched: number, total: number) => void
+  onProgress?: (fetched: number, total: number) => void,
+  onLog?: (line: string) => void
 ): Promise<Book[]> {
   const cached = getCachedBooks(label, year);
   if (cached) {
     onProgress?.(cached.length, cached.length);
+    onLog?.(`${label} ${year}: キャッシュから ${cached.length}件`);
     return cached;
   }
 
@@ -121,7 +123,12 @@ export async function fetchBooksForLabelYear(
 
     if (startRecord === 1) {
       totalRecords = total;
+      const head = xmlText.slice(0, 200).replace(/\s+/g, ' ');
       console.log(`[NDL] ${label} ${year}: ${total}件 レスポンス先頭:`, xmlText.slice(0, 400));
+      onLog?.(`${label} ${year}: numberOfRecords=${total} / 抽出=${books.length}件`);
+      if (total === 0) {
+        onLog?.(`  ↳ レスポンス先頭: ${head}`);
+      }
     }
 
     allBooks.push(...books);
@@ -138,11 +145,15 @@ export async function fetchAllBooks(
   labels: string[],
   yearStart: number,
   yearEnd: number,
-  onProgress?: (message: string, percent: number) => void
+  onProgress?: (message: string, percent: number) => void,
+  onLog?: (line: string) => void
 ): Promise<Book[]> {
   const allBooks: Book[] = [];
   const totalTasks = labels.length * (yearEnd - yearStart + 1);
   let completedTasks = 0;
+
+  onLog?.(`取得開始: ${labels.length}レーベル × ${yearEnd - yearStart + 1}年 = ${totalTasks}リクエスト`);
+  onLog?.(`プロキシURL: ${proxyUrl}`);
 
   for (const label of labels) {
     for (let year = yearStart; year <= yearEnd; year++) {
@@ -157,15 +168,17 @@ export async function fetchAllBooks(
             `取得中: ${label} ${year}年 (${fetched}/${total})`,
             Math.round(((completedTasks + subPercent) / totalTasks) * 100)
           );
-        });
+        }, onLog);
         allBooks.push(...books);
       } catch (err) {
         console.error(`Failed to fetch ${label} ${year}:`, err);
+        onLog?.(`❌ ${label} ${year}: ${err instanceof Error ? err.message : String(err)}`);
       }
       completedTasks++;
     }
   }
 
+  onLog?.(`取得完了: 合計 ${allBooks.length}件`);
   onProgress?.('完了', 100);
   return allBooks;
 }

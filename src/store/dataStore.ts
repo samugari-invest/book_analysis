@@ -16,6 +16,7 @@ interface DataStore {
   coocEdges: CoocEdge[];
   fetchStatus: FetchStatus;
   config: AppConfig;
+  debugLogs: string[];
 
   setBooks: (books: Book[]) => void;
   setTokenizedMap: (map: Map<string, string[]>) => void;
@@ -23,6 +24,8 @@ interface DataStore {
   setCoocData: (nodes: CoocNode[], edges: CoocEdge[]) => void;
   setFetchStatus: (status: Partial<FetchStatus>) => void;
   setConfig: (config: Partial<AppConfig>) => void;
+  addLog: (line: string) => void;
+  clearLogs: () => void;
 }
 
 export const useDataStore = create<DataStore>((set) => ({
@@ -31,6 +34,7 @@ export const useDataStore = create<DataStore>((set) => ({
   wordFrequencies: [],
   coocNodes: [],
   coocEdges: [],
+  debugLogs: [],
   fetchStatus: {
     isLoading: false,
     message: '',
@@ -38,7 +42,7 @@ export const useDataStore = create<DataStore>((set) => ({
     error: null,
   },
   config: {
-    proxyUrl: 'http://localhost:8787',
+    proxyUrl: 'https://ndl-proxy.kitagatanoyatu.workers.dev',
     activeLabels: [...DEFAULT_LABELS],
     yearStart: 2005,
     yearEnd: 2025,
@@ -54,4 +58,9 @@ export const useDataStore = create<DataStore>((set) => ({
     set((state) => ({ fetchStatus: { ...state.fetchStatus, ...status } })),
   setConfig: (config) =>
     set((state) => ({ config: { ...state.config, ...config } })),
+  addLog: (line) =>
+    set((state) => ({
+      debugLogs: [...state.debugLogs, `[${new Date().toLocaleTimeString()}] ${line}`].slice(-100),
+    })),
+  clearLogs: () => set({ debugLogs: [] }),
 }));

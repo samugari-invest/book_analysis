@@ -42,7 +42,7 @@ const btn = (color: string, textColor = '#fff'): React.CSSProperties => ({
 });
 
 export default function DataFetcher() {
-  const { config, setConfig, fetchStatus, setFetchStatus, setBooks, setTokenizedMap, setWordFrequencies, setCoocData } = useDataStore();
+  const { config, setConfig, fetchStatus, setFetchStatus, setBooks, setTokenizedMap, setWordFrequencies, setCoocData, debugLogs, addLog, clearLogs } = useDataStore();
   const [localProxy, setLocalProxy] = useState(config.proxyUrl);
   const [localYearStart, setLocalYearStart] = useState(String(config.yearStart));
   const [localYearEnd, setLocalYearEnd] = useState(String(config.yearEnd));
@@ -68,18 +68,30 @@ export default function DataFetcher() {
 
   const handleFetch = async () => {
     applyConfig();
+    clearLogs();
     setFetchStatus({ isLoading: true, error: null, message: '初期化中...', percent: 0 });
     try {
+      if (config.activeLabels.length === 0) {
+        throw new Error('レーベルが1つも選択されていません');
+      }
       const books = await fetchAllBooks(
         localProxy.trim(),
         config.activeLabels,
         parseInt(localYearStart) || 2005,
         parseInt(localYearEnd) || 2025,
-        (message, percent) => setFetchStatus({ message, percent })
+        (message, percent) => setFetchStatus({ message, percent }),
+        addLog
       );
       setBooks(books);
 
+      if (books.length === 0) {
+        addLog('⚠️ 取得件数が0件でした。上のログでnumberOfRecordsとレスポンス内容を確認してください。');
+        setFetchStatus({ isLoading: false, error: '取得件数が0件でした', message: '0件', percent: 0 });
+        return;
+      }
+
       setFetchStatus({ message: '形態素解析中...', percent: 100 });
+      addLog(`形態素解析を開始 (${books.length}件)...`);
       const stopWords = localStopWords.split(/[\n,、]/).map(s => s.trim()).filter(Boolean);
       const tokenizer = await initTokenizer();
       const map = new Map<string, string[]>();
@@ -95,8 +107,10 @@ export default function DataFetcher() {
       const { nodes, edges } = computeCooccurrence(books, map, threshold);
       setCoocData(nodes, edges);
 
+      addLog(`✅ 完了: ${books.length}件 / 語彙${wf.length}語 / 共起ノード${nodes.length}`);
       setFetchStatus({ isLoading: false, message: `完了: ${books.length}件取得`, percent: 100 });
     } catch (err) {
+      addLog(`❌ エラー: ${err instanceof Error ? err.message : String(err)}`);
       setFetchStatus({ isLoading: false, error: String(err), message: 'エラーが発生しました', percent: 0 });
     }
   };
@@ -117,9 +131,9 @@ export default function DataFetcher() {
             style={input}
             value={localProxy}
             onChange={e => setLocalProxy(e.target.value)}
-            placeholder="http://localhost:8787"
+            placeholder="https://ndl-proxy.xxx.workers.dev"
           />
-          <small style={{ color: '#999' }}>Cloudflare Worker のローカル開発URL（wrangler dev）</small>
+          <small style={{ color: '#999' }}>デプロイ済みCloudflare WorkerのURL（末尾に / は付けない）</small>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
@@ -191,6 +205,42 @@ export default function DataFetcher() {
             {fetchStatus.error ? `❌ ${fetchStatus.error}` : `✅ ${fetchStatus.message}`}
           </div>
         )}
+      </div>
+
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <h2 style={{ fontSize: '16px' }}>🪵 実行ログ</h2>
+          <button style={{ ...btn('#888'), padding: '4px 12px', fontSize: '12px' }} onClick={clearLogs}>
+            クリア
+          </button>
+        </div>
+        <div
+          style={{
+            background: '#1e1e1e',
+            color: '#d4d4d4',
+            fontFamily: 'Consolas, Menlo, monospace',
+            fontSize: '12px',
+            padding: '12px',
+            borderRadius: '4px',
+            height: '260px',
+            overflowY: 'auto',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}
+        >
+          {debugLogs.length === 0 ? (
+            <span style={{ color: '#777' }}>ここに取得状況が表示されます。「データ取得・分析」を押してください。</span>
+          ) : (
+            debugLogs.map((line, i) => (
+              <div key={i} style={{ color: line.includes('❌') ? '#f48771' : line.includes('✅') ? '#89d185' : '#d4d4d4' }}>
+                {line}
+              </div>
+            ))
+          )}
+        </div>
+        <small style={{ color: '#999' }}>
+          ※ このログはブラウザのF12を開かなくても確認できます
+        </small>
       </div>
     </div>
   );
