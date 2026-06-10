@@ -1,73 +1,114 @@
 import { Book } from '../types';
 import { getCachedBooks, setCachedBooks } from './cache';
 
-function parseXmlBooks(xmlText: string, label: string): { books: Book[]; total: number } {
+// getElementsByTagNameNS-based helper to handle XML namespaces in DOMParser output
+function getTextByLocalName(el: Element, localName: string): string {
+  // Try direct querySelector first (works when namespace prefixes are resolved)
+  const direct = el.querySelector(localName);
+  if (direct) return direct.textContent?.trim() || '';
+  // Fallback: iterate all elements matching localName regardless of namespace
+  const all = el.getElementsByTagName('*');
+  for (let i = 0; i < all.length; i++) {
+    if (all[i].localName === localName) return all[i].textContent?.trim() || '';
+  }
+  return '';
+}
+
+function parseXmlBooks(xmlText: string, label: string, fallbackYear = 0): { books: Book[]; total: number; diagnostic: string } {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xmlText, 'application/xml');
 
   const parseError = doc.querySelector('parsererror');
   if (parseError) {
     console.error('XML parse error', parseError.textContent);
-    return { books: [], total: 0 };
+    return { books: [], total: 0, diagnostic: 'XMLパースエラー' };
   }
 
-  const totalEl = doc.querySelector('numberOfRecords');
-  const total = totalEl ? parseInt(totalEl.textContent || '0', 10) : 0;
+  const allEls = doc.getElementsByTagName('*');
 
-  const records = doc.querySelectorAll('recordData');
+  // Extract SRU diagnostic message if present (query errors etc.)
+  let diagnostic = '';
+  for (let i = 0; i < allEls.length; i++) {
+    const ln = allEls[i].localName;
+    if (ln === 'message' || ln === 'details') {
+      const txt = allEls[i].textContent?.trim();
+      if (txt) diagnostic += (diagnostic ? ' / ' : '') + `${ln}: ${txt}`;
+    }
+  }
+
+  // numberOfRecords may have namespace prefix
+  let total = 0;
+  for (let i = 0; i < allEls.length; i++) {
+    if (allEls[i].localName === 'numberOfRecords') {
+      total = parseInt(allEls[i].textContent || '0', 10);
+      break;
+    }
+  }
+
+  // recordData elements
+  const records: Element[] = [];
+  for (let i = 0; i < allEls.length; i++) {
+    if (allEls[i].localName === 'recordData') records.push(allEls[i]);
+  }
+
   const books: Book[] = [];
 
   records.forEach(record => {
-    const getEl = (tag: string): string => {
-      const els = record.querySelectorAll(tag);
-      if (els.length > 0) return els[0].textContent?.trim() || '';
-      return '';
-    };
-
-    // NDC subject: look for dc:subject with xsi:type containing NDC
+    // NDC subject
     let ndc = '';
-    const subjects = record.querySelectorAll('subject');
-    subjects.forEach(s => {
-      const type = s.getAttribute('xsi:type') || s.getAttribute('type') || '';
-      if (type.toLowerCase().includes('ndc') || type.toLowerCase().includes('ndl')) {
-        ndc = s.textContent?.trim() || '';
+    const allInRecord = record.getElementsByTagName('*');
+    for (let i = 0; i < allInRecord.length; i++) {
+      const el = allInRecord[i];
+      if (el.localName === 'subject') {
+        const type = el.getAttribute('xsi:type') || el.getAttribute('type') || '';
+        if (type.toLowerCase().includes('ndc') || type.toLowerCase().includes('ndl')) {
+          ndc = el.textContent?.trim() || '';
+          break;
+        }
       }
-    });
+    }
     if (!ndc) {
-      // fallback: first subject
-      const firstSubject = record.querySelector('subject');
-      ndc = firstSubject?.textContent?.trim() || '';
+      for (let i = 0; i < allInRecord.length; i++) {
+        if (allInRecord[i].localName === 'subject') {
+          ndc = allInRecord[i].textContent?.trim() || '';
+          break;
+        }
+      }
     }
 
-    const title = getEl('title');
-    const author = getEl('creator');
-    const dateStr = getEl('date');
-    const publisher = getEl('publisher');
+    const title = getTextByLocalName(record, 'title');
+    const author = getTextByLocalName(record, 'creator');
+    const publisher = getTextByLocalName(record, 'publisher');
+    // dcndl record uses dcterms:issued (or dc:date) for publication date
+    const dateStr = getTextByLocalName(record, 'issued') || getTextByLocalName(record, 'date');
 
     const yearMatch = dateStr.match(/(\d{4})/);
-    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : fallbackYear;
 
-    if (title && year > 0) {
+    if (title) {
       books.push({ title, author, year, publisher, ndc, label });
     }
   });
 
-  return { books, total };
+  return { books, total, diagnostic };
 }
 
 export async function fetchBooksForLabelYear(
   proxyUrl: string,
   label: string,
   year: number,
-  onProgress?: (fetched: number, total: number) => void
+  onProgress?: (fetched: number, total: number) => void,
+  onLog?: (line: string) => void
 ): Promise<Book[]> {
   const cached = getCachedBooks(label, year);
   if (cached) {
     onProgress?.(cached.length, cached.length);
+    onLog?.(`${label} ${year}: キャッシュから ${cached.length}件`);
     return cached;
   }
 
-  const baseQuery = `(nis.label="${label}") AND (dcterms.date >= "${year}") AND (dcterms.date <= "${year}")`;
+  // NDL SRU CQL: 'anywhere' = full-text keyword; 'from'/'until' = publication date range (year ok)
+  const baseQuery = `anywhere="${label}" AND from="${year}" AND until="${year}"`;
   const pageSize = 200;
   let startRecord = 1;
   let totalRecords = 0;
@@ -89,15 +130,19 @@ export async function fetchBooksForLabelYear(
       throw new Error(`Proxy request failed: ${resp.status} ${resp.statusText}`);
     }
     const xmlText = await resp.text();
-    const { books, total } = parseXmlBooks(xmlText, label);
+    const { books, total, diagnostic } = parseXmlBooks(xmlText, label, year);
 
     if (startRecord === 1) {
       totalRecords = total;
+      console.log(`[NDL] ${label} ${year}: ${total}件`, xmlText.slice(0, 400));
+      onLog?.(`${label} ${year}: numberOfRecords=${total} / 抽出=${books.length}件`);
+      if (diagnostic) {
+        onLog?.(`  ↳ NDL診断: ${diagnostic}`);
+      }
     }
 
     allBooks.push(...books);
     onProgress?.(allBooks.length, totalRecords);
-
     startRecord += pageSize;
   } while (startRecord <= totalRecords && totalRecords > 0);
 
@@ -110,11 +155,15 @@ export async function fetchAllBooks(
   labels: string[],
   yearStart: number,
   yearEnd: number,
-  onProgress?: (message: string, percent: number) => void
+  onProgress?: (message: string, percent: number) => void,
+  onLog?: (line: string) => void
 ): Promise<Book[]> {
   const allBooks: Book[] = [];
   const totalTasks = labels.length * (yearEnd - yearStart + 1);
   let completedTasks = 0;
+
+  onLog?.(`取得開始: ${labels.length}レーベル × ${yearEnd - yearStart + 1}年 = ${totalTasks}リクエスト`);
+  onLog?.(`プロキシURL: ${proxyUrl}`);
 
   for (const label of labels) {
     for (let year = yearStart; year <= yearEnd; year++) {
@@ -129,15 +178,17 @@ export async function fetchAllBooks(
             `取得中: ${label} ${year}年 (${fetched}/${total})`,
             Math.round(((completedTasks + subPercent) / totalTasks) * 100)
           );
-        });
+        }, onLog);
         allBooks.push(...books);
       } catch (err) {
         console.error(`Failed to fetch ${label} ${year}:`, err);
+        onLog?.(`❌ ${label} ${year}: ${err instanceof Error ? err.message : String(err)}`);
       }
       completedTasks++;
     }
   }
 
+  onLog?.(`取得完了: 合計 ${allBooks.length}件`);
   onProgress?.('完了', 100);
   return allBooks;
 }

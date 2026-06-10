@@ -7,6 +7,22 @@ export default defineConfig({
     port: 5173,
   },
   optimizeDeps: {
-    exclude: ['kuromoji'],
+    include: ['kuromoji'],
+  },
+  resolve: {
+    alias: {
+      path: 'path-browserify',
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          recharts: ['recharts'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 800,
   },
 });
