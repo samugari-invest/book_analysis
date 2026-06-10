@@ -117,20 +117,15 @@ export async function fetchBooksForLabelYear(
       throw new Error(`Proxy request failed: ${resp.status} ${resp.statusText}`);
     }
     const xmlText = await resp.text();
-    if (startRecord === 1) {
-      // Log first response for debugging
-      console.debug(`[NDL] ${label} ${year} response:`, xmlText.slice(0, 500));
-    }
     const { books, total } = parseXmlBooks(xmlText, label);
 
     if (startRecord === 1) {
       totalRecords = total;
-      console.debug(`[NDL] ${label} ${year}: total=${total}`);
+      console.log(`[NDL] ${label} ${year}: ${total}件 レスポンス先頭:`, xmlText.slice(0, 400));
     }
 
     allBooks.push(...books);
     onProgress?.(allBooks.length, totalRecords);
-
     startRecord += pageSize;
   } while (startRecord <= totalRecords && totalRecords > 0);
 
