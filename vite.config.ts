@@ -9,4 +9,20 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['kuromoji'],
   },
+  resolve: {
+    alias: {
+      path: 'path-browserify',
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          recharts: ['recharts'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 800,
+  },
 });

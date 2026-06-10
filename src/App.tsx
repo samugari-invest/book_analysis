@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
 import DataFetcher from './components/DataFetcher';
 import YearlyCount from './components/YearlyCount';
 import CategoryTrend from './components/CategoryTrend';
 import FreqWordTable from './components/FreqWordTable';
-import CoocNetwork from './components/CoocNetwork';
 import ExportPanel from './components/ExportPanel';
+
+const CoocNetwork = lazy(() => import('./components/CoocNetwork'));
 
 type Tab = 'fetch' | 'yearly' | 'category' | 'words' | 'network' | 'export';
 
@@ -108,7 +109,11 @@ export default function App() {
         {activeTab === 'yearly' && <YearlyCount />}
         {activeTab === 'category' && <CategoryTrend />}
         {activeTab === 'words' && <FreqWordTable />}
-        {activeTab === 'network' && <CoocNetwork />}
+        {activeTab === 'network' && (
+          <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>読み込み中...</div>}>
+            <CoocNetwork />
+          </Suspense>
+        )}
         {activeTab === 'export' && <ExportPanel />}
       </main>
     </div>

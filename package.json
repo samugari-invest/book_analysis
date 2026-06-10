@@ -8,8 +8,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/path-browserify": "^1.0.3",
     "kuromoji": "^0.1.2",
     "papaparse": "^5.4.1",
+    "path-browserify": "^1.0.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "recharts": "^2.12.0",
