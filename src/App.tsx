@@ -4,6 +4,7 @@ import YearlyCount from './components/YearlyCount';
 import CategoryTrend from './components/CategoryTrend';
 import FreqWordTable from './components/FreqWordTable';
 import ExportPanel from './components/ExportPanel';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const CoocNetwork = lazy(() => import('./components/CoocNetwork'));
 
@@ -105,16 +106,18 @@ export default function App() {
       </nav>
 
       <main style={styles.content}>
-        {activeTab === 'fetch' && <DataFetcher />}
-        {activeTab === 'yearly' && <YearlyCount />}
-        {activeTab === 'category' && <CategoryTrend />}
-        {activeTab === 'words' && <FreqWordTable />}
-        {activeTab === 'network' && (
-          <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>読み込み中...</div>}>
-            <CoocNetwork />
-          </Suspense>
-        )}
-        {activeTab === 'export' && <ExportPanel />}
+        <ErrorBoundary>
+          {activeTab === 'fetch' && <DataFetcher />}
+          {activeTab === 'yearly' && <YearlyCount />}
+          {activeTab === 'category' && <CategoryTrend />}
+          {activeTab === 'words' && <FreqWordTable />}
+          {activeTab === 'network' && (
+            <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>読み込み中...</div>}>
+              <CoocNetwork />
+            </Suspense>
+          )}
+          {activeTab === 'export' && <ExportPanel />}
+        </ErrorBoundary>
       </main>
     </div>
   );
