@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
   },
   optimizeDeps: {
-    exclude: ['kuromoji'],
+    include: ['kuromoji'],
   },
   resolve: {
     alias: {
